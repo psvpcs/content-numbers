@@ -1,149 +1,198 @@
-var last_value = '';
-var domain = 'se';
-
-$('#link').bind("enterKey", function(e) {
-  $('#getNumbers').click();
-});
-$('input').keyup(function(e) {
-  if (e.keyCode == 13) {
-    $(this).trigger("enterKey");
+``` // ==UserScript==
+// @name        Housenumbers
+// @namespace   viaplay.com
+// @include     /^https?://(.*\.)?viaplay.(se|no|dk|fi)\//
+// @version     1.6
+// @grant       none
+// ==/UserScript==
+let seasonObserver = undefined;
+let sportScheduleObserver = undefined;
+function get_housenumber(element) {
+  if(element.hasAttribute(‘data-product-id’)) {
+    return element.getAttribute(‘data-product-id’);
   }
-});
-
-$('.button').click(function() {
-  $('.button').toggleClass('active');
-  if ($('#c_button').hasClass('active')) {
-    $('#copy_paste').show();
-    $('#search').hide();
-  } else {
-    $('#search').show();
-    $('#copy_paste').hide();
+  if (element.hasAttribute(‘data-stream-url’)) {
+    return element.getAttribute(‘data-stream-url’).match(/guid=([^&]+)/)[1];
   }
-});
-
-$('#getNumbers').click(function() {
-  getNumbers($('#link').val());
-});
-$('#search_field').keyup(searchContent);
-
-function getNumbers(link) {
-  $('#middle').html('<img src="style/img/loader.svg">' + '<p class="movie_number">0%</p>');
-  //let patt = /viaplay.se\/\w+\/[\w-]+/i;
-  let patt = /viaplay.[sfdn][eoki]\/\w+\/[\w-\.]+/i;
-  let match = link.match(patt);
-
-  if (match) {
-
-    let domain = match[0].substring(8, 10);
-    let link = match[0].substring(10, match[0].length);
-    let getHTTP = 'https://content.viaplay.' + domain + '/pcdash-' + domain + link;
-
-    $.get(getHTTP, function(data, status) {
-      if (status != 'success') $('#middle').html('');
-      // detect if movie or series
-      if (data['_embedded']['viaplay:blocks']['0']['type'] == 'product') {
-
-        let guid = data['_embedded']['viaplay:blocks'][0]['_embedded']['viaplay:product']['system']['guid'];
-
-        $('#middle').html("<p class='movie_number'>" + guid + '</p>');
-        $('.movie_number').OneClickSelect();
-      } else {
-
-        let season_num = data['_embedded']['viaplay:blocks'].length - 2;
-        let season_arr = [];
-        let avail_seasons = [];
-        let count = 0;
-
-        for (let j = 1; j <= season_num; j++) {
-          avail_seasons.push(data['_embedded']['viaplay:blocks'][j]['title']);
-        }
-
-        for (let num = 0; num < season_num; num++) {
-
-          let URL = getHTTP + '?seasonNumber=' + avail_seasons[num];
-          $.get(URL, function(data) {
-            let blocks = data['_embedded']['viaplay:blocks'][1]['_embedded']['viaplay:products'];
-            let content_numbers = '';
-            let episodes = '';
-            let i = 1;
-            for (let key in blocks) {
-              episodes += '<span class="boxie">Episode ' + i + ':</span>';
-              content_numbers += '<span class="num-boxie">' + blocks[key].system.guid + '</span>';
-              i++;
-            }
-            let title = '<div class="season-num">Season ' + avail_seasons[num] + '</div>';
-            episodes = '<div class="episodes">' + episodes + '</div>';
-            content_numbers = '<div class="numbers">' + content_numbers + '</div>';
-            season_arr[num] = '<div class="season">' + title + episodes + content_numbers + '</div>';
-            count++;
-            $('#middle').html('<img src="style/img/loader.svg">' + '<p class="movie_number">' + Math.round((count / season_num) * 100) + '%</p>');
-            if (count == season_num) {
-              $('#middle').html(season_arr.join(''));
-              $('html, body').animate({
-                scrollTop: $("#middle").offset().top
-              }, 280);
-              $('.num-boxie').OneClickSelect();
-            }
-          });
-
-        }
-      }
-    }).fail(function() {
-      $('#middle').html("<p class='movie_number'>404 - page not found</p>");
-    });
-  } else $('#middle').html("<p class='movie_number'>Invalid link</p>");
+  if (element.hasAttribute(‘src’)) {
+    return element.getAttribute(‘src’).match(/https?:\/\/.*\/([^_]+).*/)[1];
+  }
+  return null;
 }
-
-function searchContent() {
-  if ($('#search_field').val() === '') $('#results').html('');
-  if ($('#search_field').val() !== last_value && $('#search_field').val() !== '') {
-    $('#results').html('');
-    var URL = 'https://content.viaplay.' + domain + '/pcdash-' + domain + '/autocomplete?query=' + $('#search_field').val();
-    console.log(URL);
-    $.get(URL, function(data) {
-      console.log(data);
-      if ('_embedded' in data['_embedded']['viaplay:blocks'][0]) {
-        $('#results').html('');
-        var results = data['_embedded']['viaplay:blocks'][0]['_embedded']['viaplay:products'];
-        for (var result of results) {
-          var title = '';
-          if (result.type === 'movie') {
-            title = result.content.title;
-            var end = result.system.availability.end;
-          } else if (result.type === 'series') title = result.content.series.title;
-          var year = result.content.production.year;
-          var path = result._links.self.href;
-          path = path.replace('https://content.viaplay.' + domain + '/pcdash-' + domain, '');
-          path = 'http://viaplay.' + domain + path.replace('?partial=true&block=1', '');
-          console.log(path);
-          $('#results').append('<div class="link" link="' + path + '">' + title + ' (' + year + ')</div>');
-          if ($('#search_field').val() === '') $('#results').html('');
-        }
-        $('.link').click(function() {
-          $('#results').html('')
-          console.log(this);
-          getNumbers($(this).attr('link'));
-        });
-      }
-    });
+function add_housenumber(item, housenumber, extra_styles = {}) {
+  const label = document.createElement(‘div’);
+  label.style.color = ‘silver’;
+  label.style.position = ‘absolute’;
+  label.style.backgroundColor = ‘black’;
+  label.style.fontSize = ‘10pt’;
+  label.style.cursor = ‘auto’;
+  label.style.top = 0;
+  label.style.right = 0;
+  label.style.paddingLeft = ‘0.5em’;
+  label.style.paddingRight = ‘0.5em’;
+  label.style.zIndex = 9;
+  label.style.display = ‘inline-block’;
+  label.appendChild(document.createTextNode(housenumber));
+  label.addEventListener(‘click’, function(e) { e.stopPropagation(); }, false);
+  for (const key in extra_styles) {
+    if (extra_styles[key] === null) {
+      label.style.removeProperty(key);
+    } else {
+      label.style.setProperty(key, extra_styles[key]);
+    }
   }
-  last_value = $('#search_field').val();
+  item.appendChild(label);
+  item.classList.add(‘housenumbered’);
 }
-
-$.fn.OneClickSelect = function() {
-  return $(this).on('click', function() {
-
-    var range, selection;
-    if (window.getSelection) {
-      selection = window.getSelection();
-      range = document.createRange();
-      range.selectNodeContents(this);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } else if (document.body.createTextRange) {
-      range = document.body.createTextRange();
-      range.moveToElementText(this);
-      range.select();
+const add_housenumbers_to_series_episodes = debounce(function(seasonSection) {
+  const episodes = seasonSection.querySelectorAll(‘div.episode:not(.housenumbered)‘);
+  Array.prototype.forEach.call(episodes, function(item) {
+    const housenumber = get_housenumber(item);
+    if(housenumber !== null) {
+      add_housenumber(item, housenumber);
     }
   });
-};
+  if(episodes.length > 0) {
+    seasonSection.classList.add(‘housenumbered’);
+  }
+}, 500);
+function add_housenumber_to_search_result(searchResult) {
+  const searchResultItems = searchResult.querySelectorAll(‘div.result > div:not(.housenumbered)‘);
+  Array.prototype.forEach.call(searchResultItems, function(item) {
+    const housenumber = get_housenumber(item);
+    add_housenumber(item, housenumber);
+  });
+}
+function add_housenumbers_to_collection(collectionSection) {
+  const products = collectionSection.querySelectorAll(‘[data-product-id]‘);
+  Array.prototype.forEach.call(products, function (item) {
+    if(!item.classList.contains(‘housenumbered’)) {
+      const housenumber = get_housenumber(item);
+      add_housenumber(item, housenumber);
+    }
+  });
+  if(products.length > 0) {
+    collectionSection.classList.add(‘housenumbered’);
+  }
+}
+function add_housenumbers_product_page(productSection) {
+  let housenumber;
+  // PlayLink This only works on EST and rentals
+  const playLink = productSection.querySelector(‘[data-product-id]‘);
+  if (playLink !== null) {
+    housenumber = get_housenumber(playLink);
+  } else {
+    // Get the house number of the first product in the content service response
+    // This does not work for sport series product pages, hence the try catch block
+    try {
+      housenumber = window.viaplay.contentResponse._embedded[‘viaplay:blocks’][0]._embedded[‘viaplay:product’].system.guid;
+    } catch (e) {
+      return; // nom nom
+    }
+  }
+  const thumbnail = productSection.querySelector(‘div.thumb’);
+  add_housenumber(thumbnail, housenumber, { ‘font-size’: ‘20pt’, ‘line-height’: ‘1.4em’, ‘top’: ‘’, ‘right’: ‘’});
+  productSection.classList.add(‘housenumbered’);
+}
+function add_housenumbers_featurebox(featureboxSection) {
+  const items = featureboxSection.querySelectorAll(‘ul.frames li:not(.housenumbered)‘);
+  Array.prototype.forEach.call(items, function(item){
+    const playButton = item.querySelector(‘a.play-btn’);
+    if (playButton === null) {
+      item.classList.add(‘housenumbered’);
+      return;
+    }
+    const housenumber = get_housenumber(playButton);
+    add_housenumber(item, housenumber, { ‘font-size’: ‘20pt’, ‘line-height’: ‘1.4em’ });
+  })
+}
+const add_housenumbers_sports_per_day = debounce(function(sportSection) {
+  Array.prototype.forEach.call(sportSection.querySelectorAll(‘li.sport-event’), function(item) {
+    if (!item.classList.contains(‘housenumbered’)) {
+      const housenumber = item.getAttribute(‘data-product-id’);
+      add_housenumber(item, housenumber, { right: ‘0px’, bottom: ‘0px’, left: null, top: null });
+    }
+  });
+  sportSection.classList.add(‘housenumbered’);
+}, 500);
+function setup_numbering_season(seasonSection) {
+  if(seasonObserver !== undefined) {
+    seasonObserver.disconnect();
+  }
+  add_housenumbers_to_series_episodes(seasonSection);
+  seasonObserver = getObserver(() => add_housenumbers_to_series_episodes(seasonSection), seasonSection);
+}
+function setup_numbering_sports_per_day(sportSection) {
+  if(sportScheduleObserver!== undefined) {
+    sportScheduleObserver.disconnect();
+  }
+  add_housenumbers_sports_per_day(sportSection);
+  sportScheduleObserver = getObserver(() => add_housenumbers_sports_per_day(sportSection), sportSection);
+}
+const setup_numbering = debounce(function() {
+  // Products in blocks
+  // Start section, series section, kids section, sport section
+  const collectionSections = document.querySelectorAll(‘section.collection’);
+  if (collectionSections.length > 0) {
+    Array.prototype.forEach.call(collectionSections, add_housenumbers_to_collection);
+  }
+  // Episodes in series
+  // Series season, Kids series season
+  const seasonSections = document.querySelectorAll(‘section div.collection.episode:not(.housenumbered)‘);
+  if (seasonSections.length > 0) {
+    Array.prototype.forEach.call(seasonSections, setup_numbering_season);
+  }
+  // Movie page, kids movie, Sport event page
+  const productSections = document.querySelectorAll(‘section.product:not(.housenumbered)‘);
+  if (productSections.length > 0) {
+    Array.prototype.forEach.call(productSections, add_housenumbers_product_page);
+  }
+  // Feature box
+  const featureBoxSections = document.querySelectorAll(‘section.featurebox’);
+  if (featureBoxSections.length > 0) {
+    Array.prototype.forEach.call(featureBoxSections, add_housenumbers_featurebox);
+  }
+  // Search result
+  const searchResult = document.querySelector(‘div.search-result div.result’);
+  if(searchResult !== null) {
+    add_housenumber_to_search_result(searchResult);
+  }
+  // Sport schedule
+  const sportSection = document.querySelector(‘section[data-viaplay-module-id=SportSchedule]:not(.housenumbered)‘);
+  if (sportSection !== null) {
+    setup_numbering_sports_per_day(sportSection);
+  }
+}, 500);
+// Returns a function, that, as long as it continues to be invoked, will not
+// be triggered. The function will be called after it stops being called for
+// N milliseconds. If `immediate` is passed, trigger the function on the
+// leading edge, instead of the trailing.
+// from underscore.js
+function debounce(func, wait) {
+  let timeout;
+  return function() {
+    const context = this;
+    const args = arguments;
+    const later = function() {
+      timeout = null;
+      func.apply(context, args);
+    };
+    const callNow = !timeout;
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+    if (callNow) {
+      func.apply(context, args);
+    }
+  };
+}
+function getObserver(fn, elementToObserv) {
+  const observer = new MutationObserver(function(mutations) {
+    mutations.forEach(fn);
+  });
+  // https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver#MutationObserverInit
+  observer.observe(elementToObserv, {childList: true, subtree: true, characterData: true, attributes: false});
+  return observer;
+}
+setup_numbering();
+getObserver(() => setup_numbering(), document.getElementsByTagName(‘body’)[0]);
+```
